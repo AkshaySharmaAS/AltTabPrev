@@ -11,6 +11,7 @@ import ctypes
 from pynput import keyboard
 import psutil
 import subprocess
+from screeninfo import get_monitors
 # Global variables
 monitor_processes = True
 
@@ -40,7 +41,7 @@ def signal_handler(signal_received, frame):
     monitor_processes = False
     server_running = False
     log_message("Service stopped.", "INFO")
-    sys.exit(0)
+    os._exit(1)
 
 # Check if wmctrl is installed
 def is_wmctrl_installed():
@@ -133,7 +134,62 @@ def show_taskbar():
 
 
 
+def check_multiple_displays():
+    monitors = get_monitors()
+    if len(monitors) > 1:
+        return True
+    else:
+        return False
+
+def detect_monitors():
+    monitors = get_monitors()
+    
+    if check_multiple_displays():
+        print("ALERT: Multiple displays detected!")
+        print(f"Total number of displays: {len(monitors)}\n")
+    
+    for i, monitor in enumerate(monitors):
+        print(f"Monitor {i+1}:")
+        print(f"    Name: {monitor.name}")
+        print(f"    Width: {monitor.width}px")
+        print(f"    Height: {monitor.height}px")
+        print(f"    Position: x={monitor.x}, y={monitor.y}")
+        print(f"    Primary: {monitor.is_primary}\n")
 # Kill specified processes
+#Try Killing the screen capturing or screen recording services
+recording_processes = [
+    "obs64.exe",         # OBS Studio
+    "obs32.exe",         # OBS Studio 32-bit
+    "XSplit.exe",        # XSplit
+    "Zoom.exe",          # Zoom
+    "Teams.exe",         # Microsoft Teams
+    "CamtasiaStudio.exe",  # Camtasia
+    "SnagitEditor.exe",  # Snagit
+    "ScreenRecorder.exe", # Generic screen recorders
+    "GameBar.exe",       # Windows Game Bar
+    "SkypeApp.exe",      # Skype
+    "ffmpeg.exe",        # FFmpeg (command-line recorder)
+    "vlc.exe",           # VLC Media Player (record screen)
+    "SnippingTool.exe",  # Windows Snipping Tool
+    "bdcam.exe",         # Bandicam
+    "smartcapture.exe",  # Other generic tools
+]
+
+def terminate_recording_processes():
+    """
+    Detect and terminate processes associated with screen recording or desktop sharing.
+    """
+    for process in psutil.process_iter(['pid', 'name']):
+        try:
+            process_name = process.info['name']
+            process_pid = process.info['pid']
+
+            # Check if the process matches known screen recording tools
+            if process_name.lower() in [p.lower() for p in recording_processes]:
+                print(f"Terminating process: {process_name} (PID: {process_pid})")
+                psutil.Process(process_pid).terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
 def kill_processes(process_names):
     for proc in psutil.process_iter(attrs=['pid', 'name']):
         try:
@@ -192,7 +248,7 @@ if platform.system() == "Windows":
         def low_level_keyboard_proc(nCode, wParam, lParam):
             if nCode == 0:  # HC_ACTION
                 vk_code = wintypes.DWORD.from_address(lParam).value
-                blocked_keys = [0x09, 0x1B, 0x5B, 0xA2, 0xA3]  # Tab, Escape, Win, Ctrl (left & right) 
+                blocked_keys = [164, 162, 0x5B, 0xA2, 0xA3]  # Tab, Escape, Win, Ctrl (left & right) 
                 if vk_code in blocked_keys:  # Tab, Escape, Left Windows key
                     log_message(f"Blocked key: {hex(vk_code)}", "INFO")
                     return 1  # Block the key
@@ -385,6 +441,11 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global server_running
         if self.path == "/startService":
+            if check_multiple_displays():
+                log_message("Detected extended Monitor")
+                subprocess.run(["powershell", "-Command", "DisplaySwitch.exe /clone"], check=True)
+                #return
+            
             log_message("Start Service", "INFO")
             service_started.set()
             self._send_response({"message": "Service started successfully"})
@@ -396,8 +457,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif platform.system() == "Linux":
                 reset_keys_linux()
             show_taskbar()
-            signal_handler(None, None)  # Simulate Ctrl+C
             self._send_response({"message": "Service stopped successfully"})
+            log_message("HTTP server stopped.", "INFO")
+            signal_handler(None, None)
+            
         else:
             self._send_response({"error": "Invalid endpoint"}, 404)
 
@@ -413,6 +476,10 @@ def start_http_server():
     if is_virtual_machine():
         log_message("Running in a virtual machine, please run outside the VM")
         return
+    if check_multiple_displays():
+        log_message("Extended Monitor has been detected, please try running without an extended monitor")
+        subprocess.run(["powershell", "-Command", "DisplaySwitch.exe /clone"], check=True)
+        #return
     global server_running
     server = HTTPServer(("localhost", 3000), RequestHandler)
     log_message("HTTP server running on port 3000...", "INFO")
@@ -421,9 +488,14 @@ def start_http_server():
 
 # Main Service
 def start_service(processes_to_kill):
+    global monitor_processes
     threading.Thread(target=monitor_processes_thread, args=(processes_to_kill,), daemon=True).start()
     threading.Thread(target=block_keys, daemon=True).start()
     hide_taskbar()
+    while monitor_processes:
+        terminate_recording_processes()
+        time.sleep(5)
+    
 
 # Main execution
 if __name__ == "__main__":
@@ -432,7 +504,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    processes_to_kill = ["notepad.exe", "calc.exe", "mstsc", "notepad++","gedit","calculator"]
+    processes_to_kill = ["notepad.exe", "calc.exe", "mstsc", "notepad++","gedit","calculator","Skype"]
 
     # Start the HTTP server in a separate thread
     server_thread = threading.Thread(target=start_http_server, daemon=True)
