@@ -12,6 +12,7 @@ from pynput import keyboard
 import psutil
 import subprocess
 from screeninfo import get_monitors
+import winreg as reg
 # Global variables
 monitor_processes = True
 
@@ -35,6 +36,30 @@ def log_message(message, level="INFO"):
     elif level == "ERROR":
         logging.error(message)
 
+def get_battery_status():
+    while True:
+        battery = psutil.sensors_battery()
+        if battery:
+            percent = battery.percent
+            plugged = battery.power_plugged
+            status = "Charging" if plugged else "Not Charging"
+
+            if battery.secsleft == psutil.POWER_TIME_UNLIMITED:
+                time_left = "Unlimited (Charging)"
+            elif battery.secsleft == psutil.POWER_TIME_UNKNOWN:
+                time_left = "Unknown"
+            else:
+                hours = battery.secsleft // 3600
+                minutes = (battery.secsleft % 3600) // 60
+                seconds = battery.secsleft % 60
+                time_left = f"{hours} hrs, {minutes} mins, {seconds} secs"
+
+        
+            return percent, status, time_left
+        else:
+            print("Battery information not available.")
+        time.sleep(100)
+
 # Signal handler
 def signal_handler(signal_received, frame):
     global monitor_processes, server_running
@@ -48,13 +73,14 @@ def is_wmctrl_installed():
     import shutil
     return shutil.which("wmctrl") is not None
 
+
 # Taskbar visibility
 def hide_taskbar():
     try:
         if platform.system() == "Windows":
             ctypes.windll.user32.ShowWindow(ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None), 0)
-            log_message("Taskbar hidden on Windows.", "INFO")
         elif platform.system() == "Linux":
+            log_message("Taskbar hidden on Windows.", "INFO")
             if is_wayland_session():
                 # Hide GNOME taskbar and side navigation bar for Wayland
                 subprocess.run(
@@ -69,17 +95,37 @@ def hide_taskbar():
                     ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "intellihide", "true"], 
                     check=True
                 )
+                subprocess.run(
+            ["gnome-extensions", "enable", "hidetopbar@mathieu.bidon.ca"],
+            check=True,
+        )
                 log_message("Taskbar and side navigation bar hidden on Wayland.", "INFO")
             else:
                 # Hide taskbar and side navigation bar for X11
-                if is_wmctrl_installed():
-                    os.system("wmctrl -k on")
-                    log_message("Taskbar hidden on X11.", "INFO")
-                else:
-                    log_message("wmctrl not installed. Cannot hide taskbar on X11.", "ERROR")
+                # if is_wmctrl_installed():
+                #     os.system("wmctrl -k on")
+                #     log_message("Taskbar hidden on X11.", "INFO")
+                # else:
+                #     log_message("wmctrl not installed. Cannot hide taskbar on X11.", "ERROR")
+                subprocess.run(
+                    ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "autohide", "true"], 
+                    check=True
+                )
+                subprocess.run(
+                    ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "dock-fixed", "false"], 
+                    check=True
+                )
+                subprocess.run(
+                    ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "intellihide", "true"], 
+                    check=True
+                )
+                subprocess.run(
+            ["gnome-extensions", "enable", "hidetopbar@mathieu.bidon.ca"],
+            check=True,
+        )
+                log_message("Taskbar and side navigation bar hidden on Wayland.", "INFO")
     except Exception as e:
         log_message(f"Error hiding taskbar: {e}", "ERROR")
-
 
 
 def get_keycode_map():
@@ -121,43 +167,114 @@ def show_taskbar():
                     ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "intellihide", "false"], 
                     check=True
                 )
+                subprocess.run(
+            ["gnome-extensions", "disable", "hidetopbar@mathieu.bidon.ca"],
+            check=True,
+        )
                 log_message("Taskbar and side navigation bar shown on Wayland.", "INFO")
             else:
                 # Show taskbar for X11
-                if is_wmctrl_installed():
-                    os.system("wmctrl -k off")
-                    log_message("Taskbar shown on X11.", "INFO")
-                else:
-                    log_message("wmctrl not installed. Cannot show taskbar on X11.", "ERROR")
+                # if is_wmctrl_installed():
+                #     os.system("wmctrl -k off")
+                #     log_message("Taskbar shown on X11.", "INFO")
+                # else:
+                #     log_message("wmctrl not installed. Cannot show taskbar on X11.", "ERROR")
+                subprocess.run(
+                    ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "autohide", "false"], 
+                    check=True
+                )
+                subprocess.run(
+                    ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "dock-fixed", "true"], 
+                    check=True
+                )
+                subprocess.run(
+                    ["gsettings", "set", "org.gnome.shell.extensions.dash-to-dock", "intellihide", "false"], 
+                    check=True
+                )
+                subprocess.run(
+            ["gnome-extensions", "disable", "hidetopbar@mathieu.bidon.ca"],
+            check=True,
+        )
+                log_message("Taskbar and side navigation bar shown on Wayland.", "INFO")
+    except Exception as e:
+        log_message(f"Error showing taskbar: {e}", "ERROR")
     except Exception as e:
         log_message(f"Error showing taskbar: {e}", "ERROR")
 
 
 
-def check_multiple_displays():
-    monitors = get_monitors()
-    if len(monitors) > 1:
-        return True
-    else:
-        return False
+# def check_multiple_displays():
+#     # open_chrome()
+#     while True:
+#         monitors = get_monitors()
+#         if len(monitors) > 1:
+#             log_message("Detected extended Monitor")
+#             try:
+#                 subprocess.run(["powershell", "-Command", "DisplaySwitch.exe /internal"], check=True)
+#             except subprocess.CalledProcessError as e:
+#                 log_message(f"Error executing DisplaySwitch.exe: {e}")
+#         time.sleep(5)
 
-def detect_monitors():
-    monitors = get_monitors()
-    
-    if check_multiple_displays():
-        print("ALERT: Multiple displays detected!")
-        print(f"Total number of displays: {len(monitors)}\n")
-    
-    for i, monitor in enumerate(monitors):
-        print(f"Monitor {i+1}:")
-        print(f"    Name: {monitor.name}")
-        print(f"    Width: {monitor.width}px")
-        print(f"    Height: {monitor.height}px")
-        print(f"    Position: x={monitor.x}, y={monitor.y}")
-        print(f"    Primary: {monitor.is_primary}\n")
+def get_active_displays():
+    """
+    Uses PowerShell to fetch connected displays and their video output technologies.
+    Returns a list of active displays with details.
+    """
+    try:
+        # Run PowerShell command to get display information
+        cmd = (
+            "Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorBasicDisplayParams "
+            "| Select-Object InstanceName, VideoOutputTechnology"
+        )
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # Suppress window
+        result = subprocess.check_output(
+            ["powershell", "-Command", cmd], text=True,startupinfo=startupinfo
+        )
+        # Parse result and extract display information
+        active_displays = [
+            line.strip() for line in result.split("\n") if line.strip() and "InstanceName" not in line
+        ]
+        return active_displays
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing PowerShell command: {e}")
+        return []
+
+def check_multiple_displays():
+    """Continuously monitors active displays and switches to internal mode when necessary."""
+    last_display_count = None  # Cache the last known number of displays
+
+    while True:
+        # Get the current active displays
+        active_displays = get_active_displays()
+        display_count = len(active_displays)
+        # Check if more than one display is active
+        if display_count >= 3 and display_count != last_display_count:
+            logging.info("More than one display detected. Switching to internal mode...")
+            try:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # Suppress window
+                subprocess.run(
+                    ["powershell", "-Command", "DisplaySwitch.exe /internal"],
+                    check=True,startupinfo=startupinfo
+                )
+                logging.info("Switched to internal display mode.")
+            except subprocess.CalledProcessError as e:
+                logging.info(f"Error executing DisplaySwitch.exe: {e}")
+        elif display_count == 1:
+            logging.info("Only one display detected")
+
+        # Update last known display count
+        last_display_count = display_count
+
+        # Delay before rechecking (can be reduced or increased as needed)
+        time.sleep(5)
+
+
 # Kill specified processes
 #Try Killing the screen capturing or screen recording services
 recording_processes = [
+
     "obs64.exe",         # OBS Studio
     "obs32.exe",         # OBS Studio 32-bit
     "XSplit.exe",        # XSplit
@@ -279,7 +396,8 @@ def block_keys_linux():
         if is_wayland_session():
             block_keys_wayland()
         else:
-            block_keys_x11()
+            block_keys_wayland()
+            #block_keys_x11()
     except Exception as e:
         log_message(f"Unexpected error while blocking keys on Linux: {e}", "ERROR")
 
@@ -313,6 +431,7 @@ def block_keys_wayland():
     try:
         # Actions and keys to block in GNOME, including Alt+Escape and Alt+~
         keys_to_block = {
+    "activate-window-menu":[],
     "switch-applications": [],
     "switch-applications-backward": [],
     "switch-windows": [],
@@ -321,19 +440,20 @@ def block_keys_wayland():
     "show-desktop": [],
     "cycle-windows": [], 
     "cycle-windows-backward": [],
-    "switch-group": [],  # Alt+~ behavior
-    
-    # Tab switching and focus change actions:
-    "switch-tab-forward": ["<Control><Tab>"],  # Ctrl+Tab switches forward between browser tabs
-    "switch-tab-backward": ["<Control><Shift><Tab>"],  # Ctrl+Shift+Tab switches backward between browser tabs
-    "focus-next-field": ["<Tab>"],  # Focus next field (Tab key to navigate through elements)
-    "focus-previous-field": ["<Shift><Tab>"],  # Shift+Tab goes backward through elements
-    "move-focus-forward": ["<Control><Tab>"],  # Alt or Control based for focus shift
-    "move-focus-backward": ["<Shift><Control><Tab>"], # Focus shift backward,
+    "switch-group": [], 
+    "switch-panels":[], # Alt+~ behavior
     "move-to-workspace-last":[], # Focus shift backward,
     "move-to-workspace-left":[], # Focus shift backward,
     "move-to-workspace-right":[], # Focus shift backward,
-    "move-to-workspace-down":[]
+    "move-to-workspace-down":[],
+    "switch-to-workspace-last":[], # Focus shift backward,
+    "switch-to-workspace-left":[], # Focus shift backward,
+    "switch-to-workspace-right":[], # Focus shift backward,
+    "switch-to-workspace-down":[],
+    "toggle-maximized":[],
+    "unmaximize":[],
+    "panel-run-dialog":[],
+    "minimize":[]
 }
 
 
@@ -357,25 +477,29 @@ def block_keys_wayland():
 def reset_keys_wayland():
     try:
         actions_to_reset = [
+   "activate-window-menu",
     "switch-applications",
     "switch-applications-backward",
     "switch-windows",
     "switch-windows-backward",
     "close",
     "show-desktop",
-    "cycle-windows",
-    "cycle-windows-backward",  
-    "switch-group",  # Alt+~ behavior
-
-    # Add reset actions related to focus change or tab switching:
-    "switch-tab-forward",  # Reset any actions related to switching tabs forward
-    "switch-tab-backward",  # Reset any actions related to switching tabs backward
-    "focus-next-field",  # Reset Tab focus switching (next field)
-    "focus-previous-field"  # Reset Shift+Tab focus switching (previous field),
-    "move-to-workspace-right",
-    "move-to-workspace-left",
-    "move-to-workspace-last",
-    "move-to-workspace-end",
+    "cycle-windows", 
+    "cycle-windows-backward",
+    "switch-group", 
+    "switch-panels", # Alt+~ behavior
+    "move-to-workspace-last", # Focus shift backward,
+    "move-to-workspace-left", # Focus shift backward,
+    "move-to-workspace-right", # Focus shift backward,
+    "move-to-workspace-down",
+    "switch-to-workspace-last", # Focus shift backward,
+    "switch-to-workspace-left", # Focus shift backward,
+    "switch-to-workspace-right", # Focus shift backward,
+    "switch-to-workspace-down",
+    "toggle-maximized",
+    "unmaximize",
+    "panel-run-dialog",
+    "minimize"
 ]
 
 
@@ -400,7 +524,8 @@ def reset_keys_linux():
     if is_wayland_session():
         reset_keys_wayland()
     else:
-        reset_keys_x11()
+        reset_keys_wayland()
+        # reset_keys_x11()
 
 # Generic key blocking function
 def block_keys():
@@ -420,7 +545,7 @@ def is_virtual_machine():
             # Linux or MacOS - check CPU info
             output = subprocess.check_output("cat /proc/cpuinfo", shell=True).decode()
         
-        virtual_keywords = ["hypervisor", "vmware", "vbox", "qemu", "virtual"]
+        virtual_keywords = ["hypervisor", "vmware", "vbox", "qemu"]
         for keyword in virtual_keywords:
             if keyword.lower() in output.lower():
                 return True
@@ -428,7 +553,61 @@ def is_virtual_machine():
     except Exception as e:
         print(f"Error occurred: {e}")
         return False
+def disable_ctrl_alt_del_options():
+    try:
+        # Registry path for disabling "Switch User"
+        switch_user_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+        with reg.CreateKey(reg.HKEY_LOCAL_MACHINE, switch_user_path) as key:
+            reg.SetValueEx(key, "HideFastUserSwitching", 0, reg.REG_DWORD, 1)
 
+        print("Switch User option disabled.")
+
+        # Registry path for disabling "Lock"
+        lock_path = r"Software\Microsoft\Windows\CurrentVersion\Policies\System"
+        
+        # Open or create the registry key
+        with reg.CreateKey(reg.HKEY_CURRENT_USER, lock_path) as key:
+            # Set or update the DisableLockWorkstation DWORD value
+            reg.SetValueEx(key, "DisableLockWorkstation", 0, reg.REG_DWORD, 1)
+        
+        print("Lock option disabled.")
+        log_message("Lock option disabled.", "INFO")
+    except PermissionError:
+        print("Permission denied. Please run this script as an administrator.")
+        log_message("Permission denied. Please run this script as an administrator.", "ERROR")
+        pass
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        log_message(f"An error occurred: {e}", "ERROR")
+        pass
+
+
+def enable_ctrl_alt_del_options():
+    try:
+        # Registry path for enabling "Switch User"
+        switch_user_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+        with reg.CreateKey(reg.HKEY_LOCAL_MACHINE, switch_user_path) as key:
+            reg.SetValueEx(key, "HideFastUserSwitching", 0, reg.REG_DWORD, 0)
+
+        print("Switch User option enabled.")
+
+        lock_path = r"Software\Microsoft\Windows\CurrentVersion\Policies\System"
+        
+        # Open or create the registry key
+        with reg.CreateKey(reg.HKEY_CURRENT_USER, lock_path) as key:
+            # Set or update the DisableLockWorkstation DWORD value
+            reg.SetValueEx(key, "DisableLockWorkstation", 0, reg.REG_DWORD, 0)
+        
+        print("Lock option disabled.")
+        log_message("Lock option disabled.", "INFO")
+    except PermissionError:
+        print("Permission denied. Please run this script as an administrator.")
+        log_message("Permission denied. Please run this script as an administrator.", "ERROR")
+        pass
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        log_message(f"An error occurred: {e}", "ERROR")
+        pass
 # HTTP Server
 class RequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -441,16 +620,14 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global server_running
         if self.path == "/startService":
-            if check_multiple_displays():
-                log_message("Detected extended Monitor")
-                subprocess.run(["powershell", "-Command", "DisplaySwitch.exe /clone"], check=True)
-                #return
-            
             log_message("Start Service", "INFO")
+            disable_ctrl_alt_del_options()
             service_started.set()
             self._send_response({"message": "Service started successfully"})
         elif self.path == "/stopService":
             log_message("Stop Service", "INFO")
+            self._send_response({"message": "Service started successfully"})
+            enable_ctrl_alt_del_options()
             server_running = False
             if platform.system() == "Windows":
                 release_keyboard_hook()
@@ -475,17 +652,23 @@ class RequestHandler(BaseHTTPRequestHandler):
 def start_http_server():
     if is_virtual_machine():
         log_message("Running in a virtual machine, please run outside the VM")
+        os._exit(1)
         return
-    if check_multiple_displays():
-        log_message("Extended Monitor has been detected, please try running without an extended monitor")
-        subprocess.run(["powershell", "-Command", "DisplaySwitch.exe /clone"], check=True)
-        #return
+    [percent,status,time_info]=get_battery_status()
+    if percent<=20 and status=="Not Charging":
+        log_message("Battery percentage is less than 20%","INFO")
+        os._exit(1)
+        return
+    
+    logging.info(f"Battery percentage: {percent}%")
+    logging.info(f"Battery status: {status}")
+    logging.info(f"Battery time: {time_info}")
     global server_running
     server = HTTPServer(("localhost", 3000), RequestHandler)
     log_message("HTTP server running on port 3000...", "INFO")
     while server_running:
         server.handle_request()
-
+    
 # Main Service
 def start_service(processes_to_kill):
     global monitor_processes
@@ -496,26 +679,44 @@ def start_service(processes_to_kill):
         terminate_recording_processes()
         time.sleep(5)
     
+def open_chrome():
+    try:
+        subprocess.run(["taskkill", "/IM", "chrome.exe", "/F"], check=True)
+    except:
+        log_message("ERROR","ERRoR")
 
+# Step 2: Wait for a moment to ensure all processes are terminated
+    time.sleep(2)  # Waits for 2 seconds
+    command = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "--kiosk",
+    "--new-window",
+    "https://localhost/TestPage/child.html",
+    "--disable-address-bar",
+    "--disable-options-button",
+    "--disable-popup-blocking"
+]
+
+# Running the command
+    subprocess.run(command)        
 # Main execution
 if __name__ == "__main__":
     
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-
+    
     processes_to_kill = ["notepad.exe", "calc.exe", "mstsc", "notepad++","gedit","calculator","Skype"]
-
+    thread = threading.Thread(target=check_multiple_displays, daemon=True)
+    thread.start()
     # Start the HTTP server in a separate thread
     server_thread = threading.Thread(target=start_http_server, daemon=True)
     server_thread.start()
 
     # Wait for /startService request
     service_started.wait()
-
     # Start the main service
     start_service(processes_to_kill)
-
     # Keep the script running
     try:
         while True:
