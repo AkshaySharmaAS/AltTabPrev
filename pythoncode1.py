@@ -4,15 +4,19 @@ import sys
 import logging
 import threading
 import time
-import socket
+#import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import platform
 import ctypes
 from pynput import keyboard
 import psutil
 import subprocess
+#import requests
+import requests
 from screeninfo import get_monitors
 import winreg as reg
+#from ultralytics import YOLO
+#import cv2
 # Global variables
 monitor_processes = True
 
@@ -35,6 +39,96 @@ def log_message(message, level="INFO"):
         logging.info(message)
     elif level == "ERROR":
         logging.error(message)
+
+# def detect_camera():
+#     # Load YOLO model with higher accuracy
+#     model = YOLO('yolov8m.pt')  # Use YOLOv8 Medium for better accuracy
+
+#     # Initialize webcam
+#     cap = cv2.VideoCapture(0,cv2.CAP_DSHOW)  # Use default webcam
+
+#     # Check if the webcam opens successfully
+#     if not cap.isOpened():
+#         print("Error: Could not open webcam")
+#         return
+
+#     # Set webcam properties
+#     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
+#     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 320)
+
+#     # Initialize variables
+#     prev_time = time.time()
+#     detection_count = 0
+#     detection_threshold = 10  # Number of frames required to confirm persistent detection
+
+#     try:
+#         while True:
+#             # Read a frame from the webcam
+#             ret, frame = cap.read()
+#             if not ret:
+#                 print("Error: Can't receive frame")
+#                 break
+
+#             # Perform object detection
+#             results = model.predict(source=frame, conf=0.7)  # Set higher confidence threshold
+
+#             # Track detection persistence
+#             detected_in_frame = False
+
+#             # Process detection results
+#             for result in results:
+#                 boxes = result.boxes
+#                 for box in boxes:
+#                     # Get bounding box coordinates
+#                     x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+
+#                     # Get class ID and confidence
+#                     class_id = int(box.cls[0])
+#                     confidence = float(box.conf[0])
+#                     class_name = model.names[class_id]
+
+#                     # Only process relevant classes
+#                     if class_name in ["cell phone", "camera"]:
+#                         detected_in_frame = True  # Mark as detected in this frame
+
+#                         # Draw a rectangle around the detected object
+#                         color = (0, 255, 0) if class_name == "cell phone" else (255, 0, 0)
+#                         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+#                         # Add label and confidence
+#                         label = f"{class_name.capitalize()}: {confidence:.2f}"
+#                         cv2.putText(frame, label, (x1, y1 - 10),
+#                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+#             # Update detection counter
+#             if detected_in_frame:
+#                 detection_count += 1
+#             else:
+#                 detection_count = max(0, detection_count - 1)  # Decay counter if not detected
+
+#             # Check for persistent detection
+#             if detection_count >= detection_threshold:
+#                 print("Persistent detection of camera or cell phone!")
+#                 return True
+
+#             # Calculate and display FPS
+#             current_time = time.time()
+#             fps = 1 / (current_time - prev_time)
+#             prev_time = current_time
+#             # cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
+#             #             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+#             # # Show the frame with detections
+#             # cv2.imshow('Camera and Cell Phone Detection', frame)
+
+#             # Break loop on 'q' key press
+#             if cv2.waitKey(1) & 0xFF == ord('q'):
+#                 break
+
+#     finally:
+#         cap.release()
+#         cv2.destroyAllWindows()
+
 
 def get_battery_status():
     while True:
@@ -60,6 +154,16 @@ def get_battery_status():
             print("Battery information not available.")
         time.sleep(100)
 
+def battery_status_wrapper():
+    
+    [percent,status,time_info]=get_battery_status()
+    if percent<=20 and status=="Not Charging":
+        log_message("Battery percentage is less than 20%", "INFO")
+        requests.get("http://localhost:3000/stopService")
+        return
+    logging.info(f"Battery percentage: {percent}%")
+    logging.info(f"Battery status: {status}")
+    logging.info(f"Battery time: {time_info}")
 # Signal handler
 def signal_handler(signal_received, frame):
     global monitor_processes, server_running
@@ -321,7 +425,7 @@ def monitor_processes_thread(process_names):
     global monitor_processes
     while monitor_processes:
         kill_processes(process_names)
-        time.sleep(5)
+        time.sleep(3)
 BLOCKED_KEYS = {keyboard.Key.tab, keyboard.Key.esc, keyboard.Key.cmd}  # Tab, Escape, Command keys
 
 def block_keyboard_mac():
@@ -608,7 +712,17 @@ def enable_ctrl_alt_del_options():
         print(f"An error occurred: {e}")
         log_message(f"An error occurred: {e}", "ERROR")
         pass
+# def detect_camera_background():
+#     """
+#     Wrapper for running detect_camera() in the background.
+#     If the camera is detected, the process exits.
+#     """
+#     if detect_camera():
+#         log_message("Camera detected", "INFO")
+#         requests.get("http://localhost:3000/stopService")
 # HTTP Server
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
@@ -616,28 +730,37 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
-
     def do_GET(self):
         global server_running
         if self.path == "/startService":
+            #threading.Thread(target=detect_camera_background, daemon=True).start()
             log_message("Start Service", "INFO")
             disable_ctrl_alt_del_options()
             service_started.set()
+            os.system("taskkill /f /im explorer.exe")
+            #suspend_explorer()
             self._send_response({"message": "Service started successfully"})
         elif self.path == "/stopService":
             log_message("Stop Service", "INFO")
-            self._send_response({"message": "Service started successfully"})
+            self._send_response({"message": "Service stopped successfully"})
             enable_ctrl_alt_del_options()
             server_running = False
             if platform.system() == "Windows":
                 release_keyboard_hook()
+                try:
+                    subprocess.Popen(["explorer.exe"], shell=False)
+                    logging.info("Explorer has been restarted")
+                except Exception as e:
+                    log_message(f"Error opening explorer: {e}", "ERROR")
+                    pass
+
+                #resume_explorer()
             elif platform.system() == "Linux":
                 reset_keys_linux()
             show_taskbar()
             self._send_response({"message": "Service stopped successfully"})
             log_message("HTTP server stopped.", "INFO")
-            signal_handler(None, None)
-            
+            signal_handler(None, None)          
         else:
             self._send_response({"error": "Invalid endpoint"}, 404)
 
@@ -654,21 +777,14 @@ def start_http_server():
         log_message("Running in a virtual machine, please run outside the VM")
         os._exit(1)
         return
-    [percent,status,time_info]=get_battery_status()
-    if percent<=20 and status=="Not Charging":
-        log_message("Battery percentage is less than 20%","INFO")
-        os._exit(1)
-        return
-    
-    logging.info(f"Battery percentage: {percent}%")
-    logging.info(f"Battery status: {status}")
-    logging.info(f"Battery time: {time_info}")
+    threading.Thread(target=battery_status_wrapper, daemon=True).start()
     global server_running
     server = HTTPServer(("localhost", 3000), RequestHandler)
     log_message("HTTP server running on port 3000...", "INFO")
     while server_running:
         server.handle_request()
-    
+
+
 # Main Service
 def start_service(processes_to_kill):
     global monitor_processes
@@ -706,7 +822,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    processes_to_kill = ["notepad.exe", "calc.exe", "mstsc", "notepad++","gedit","calculator","Skype"]
+    processes_to_kill = ["notepad.exe", "calc.exe", "mstsc", "notepad++","gedit","calculator","Skype","LogonUI"]
     thread = threading.Thread(target=check_multiple_displays, daemon=True)
     thread.start()
     # Start the HTTP server in a separate thread
